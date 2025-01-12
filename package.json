@@ -1,6 +1,6 @@
 {
   "name": "@dispatchedjs/cli",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Dispatched - CLI",
   "main": "dist/index.js",
   "bin": {
