@@ -2,6 +2,8 @@
 
 This is a TypeScript helper library for node.js server side to integrate [Dispatched](https://dispatched.dev) into your application.
 
+![NPM Version](https://img.shields.io/npm/v/%40dispatchedjs%2Fcli?style=flat) ![License](https://img.shields.io/npm/l/%40dispatchedjs%2Fcli?style=flat) ![example workflow](https://github.com/dispatched-dev/dispatchedjs-sdk/actions/workflows/main.yml/badge.svg)
+
 ## Usage
 
 When developing locally, you can use the [Dispatched CLI](https://github.com/dispatched-dev/dispatchedjs-cli) to start a local server that will receive webhook callbacks.
