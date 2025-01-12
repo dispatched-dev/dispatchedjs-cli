@@ -24,25 +24,35 @@ export class Server {
   private setupWebhook(): void {
     this.app.post("/api/jobs/dispatch", async (req: Request, res: Response) => {
       try {
-        console.log("Processing:", req.body);
+        console.log("Job Received", req.body);
+
+        const webhookHeaders = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.config.webhookSecret}`,
+        };
+        const webhookBody = {
+          jobId: randomId(),
+          attempt: randomId(),
+          attemptNumber: 1,
+          status: "QUEUED",
+          payload: req.body,
+        };
+
+        console.log('Sending webhook to:', this.config.forwardUrl, {
+          method: "POST",
+          headers: webhookHeaders,
+          body: webhookBody,
+        });
 
         const response = await fetch(this.config.forwardUrl, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${this.config.webhookSecret}`,
-          },
-          body: JSON.stringify({
-            jobId: randomId(),
-            attempt: randomId(),
-            attemptNumber: 1,
-            status: "QUEUED",
-            payload: req.body,
-          }),
+          headers: webhookHeaders,
+          body: JSON.stringify(webhookBody),
         });
-        console.log("Processor Response:", response);
+
+        console.log('Webhook Response:', response);
       } catch (error) {
-        console.error("Error processing webhook:", error);
+        console.error("Error processing request:", error);
         res.status(500).json({ error: "Internal server error" });
       }
     });
@@ -55,9 +65,10 @@ export class Server {
       console.log(
         `🔒 Validating webhooks with secret: ${this.config.webhookSecret.slice(
           0,
-          3
+          6
         )}...`
       );
+      console.log(' ');
     });
   }
 }
