@@ -41,11 +41,11 @@ yargs(hideBin(process.argv))
     'Usage: dispatchedjs listen --secret="any-webhook-secret-for-local-dev" --forward="http://localhost:3000/path/to/webhook/endpoint" --port=3100'
   )
   .example(
-    "$0 listen --secret abc123 --forward http://localhost:3000/webhook",
+    "$0 listen --secret \"abc123\" --forward \"http://localhost:3000/webhook\"",
     "Start webhook server"
   )
   .example(
-    "$0 listen --secret abc123 --forward http://localhost:3000/webhook --port 3200",
+    "$0 listen --secret \"abc123\" --forward\" http://localhost:3000/webhook\" --port 3200",
     "Start on custom port"
   )
   .describe("help", "Show help")

@@ -1,7 +1,7 @@
 {
   "name": "@dispatchedjs/cli",
   "version": "0.0.1",
-  "description": "Dispatched CLI",
+  "description": "Dispatched - CLI",
   "main": "dist/index.js",
   "bin": {
     "dispatchedjs": "./dist/index.js"
@@ -14,12 +14,20 @@
   "scripts": {
     "build": "rollup -c",
     "test": "jest",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "trypublish": "npm publish --access public"
   },
   "keywords": [
-    "typescript",
-    "browser"
+    "cli"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dispatched-dev/dispatchedjs-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dispatched-dev/dispatchedjs-cli/issues"
+  },
+  "homepage": "https://dispatched.dev",
   "author": "Dispatched <info@dispatched.dev>",
   "license": "MIT",
   "devDependencies": {
