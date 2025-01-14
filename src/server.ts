@@ -9,12 +9,14 @@ interface ServerConfig {
 export class Server {
   private app: Express;
   private config: ServerConfig;
+  private jobCache: Map<string, any>;
 
   constructor(config: ServerConfig) {
     this.app = express();
     this.config = config;
     this.setupMiddleware();
     this.setupWebhook();
+    this.jobCache = new Map<string, any>();
   }
 
   private setupMiddleware(): void {
@@ -30,31 +32,89 @@ export class Server {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.config.webhookSecret}`,
         };
+
+        const job = {
+          id: randomId(),
+          status: "QUEUED",
+        };
+        this.jobCache.set(job.id, job);
+
         const webhookBody = {
-          jobId: randomId(),
+          jobId: job.id,
           attempt: randomId(),
           attemptNumber: 1,
-          status: "QUEUED",
+          status: job.status,
           payload: req.body,
         };
 
-        console.log('Sending webhook to:', this.config.forwardUrl, {
+        console.log("Sending webhook to:", this.config.forwardUrl, {
           method: "POST",
           headers: webhookHeaders,
           body: webhookBody,
         });
 
-        const response = await fetch(this.config.forwardUrl, {
-          method: "POST",
-          headers: webhookHeaders,
-          body: JSON.stringify(webhookBody),
-        });
+        try {
+          const webhookResponse = await fetch(this.config.forwardUrl, {
+            method: "POST",
+            headers: webhookHeaders,
+            body: JSON.stringify(webhookBody),
+          });
 
-        console.log('Webhook Response:', response);
+          this.jobCache.set(job.id, {
+            ...job,
+            status: "COMPLETED",
+          });
+          console.log("Webhook Response:", webhookResponse);
+        } catch (error) {
+          this.jobCache.set(job.id, {
+            ...job,
+            status: "FAILED",
+          });
+          console.log("Webhook Error:", error);
+          return res.status(500).json({ error: "Internal server error" });
+        }
+
+        console.log("Dispatch Response", job);
+        console.log("--------------------------------------------------------");
+
+        res.status(201).json(job);
       } catch (error) {
         console.error("Error processing request:", error);
         res.status(500).json({ error: "Internal server error" });
       }
+    });
+
+    this.app.get("/api/jobs/:id", (req: Request, res: Response) => {
+      const job = this.jobCache.get(req.params.id);
+
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      res.status(200).json(job);
+    });
+
+    this.app.delete("/api/jobs/:id", (req: Request, res: Response) => {
+      const job = this.jobCache.get(req.params.id);
+
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      if (job.status !== "QUEUED") {
+        return res.status(400).json({ error: "Job already completed" });
+      }
+
+      console.log("Cancelling job", job);
+
+      this.jobCache.set(req.params.id, {
+        ...job,
+        status: "CANCELLED",
+      });
+
+      console.log("Job cancelled", job);
+
+      res.status(200).json(job);
     });
   }
 
@@ -68,7 +128,7 @@ export class Server {
           6
         )}...`
       );
-      console.log(' ');
+      console.log(" ");
     });
   }
 }
