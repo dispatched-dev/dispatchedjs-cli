@@ -1,131 +1,233 @@
-import { Server } from '../server';
-import express, { Express, Request, Response } from 'express';
+import { Server } from "../server";
+import express, { Express, Request, Response } from "express";
 
 // Create mock types
 type MockExpress = jest.Mocked<Express> & {
-    use: jest.Mock;
-    post: jest.Mock;
-    listen: jest.Mock;
+  use: jest.Mock;
+  post: jest.Mock;
+  get: jest.Mock;
+  delete: jest.Mock;
+  listen: jest.Mock;
 };
 
 type MockExpressFactory = jest.Mock<MockExpress>;
 
 // Mock express and its methods
-jest.mock('express', () => {
-    const json = jest.fn();
-    const mockApp = {
-        use: jest.fn(),
-        post: jest.fn(),
-        listen: jest.fn((port, callback) => callback()),
-    };
-    return Object.assign(jest.fn(() => mockApp), { json });
+jest.mock("express", () => {
+  const json = jest.fn();
+  const mockApp = {
+    use: jest.fn(),
+    post: jest.fn(),
+    get: jest.fn(),
+    delete: jest.fn(),
+    listen: jest.fn((port, callback) => callback()),
+  };
+  return Object.assign(
+    jest.fn(() => mockApp),
+    { json }
+  );
 });
 
 // Mock fetch
 global.fetch = jest.fn();
 
-describe('Server', () => {
-    let server: Server;
-    let mockExpressApp: MockExpress;
+describe("Server", () => {
+  let server: Server;
+  let mockExpressApp: MockExpress;
 
-    const mockConfig = {
-        webhookSecret: 'test-secret',
-        forwardUrl: 'http://test-forward-url.com',
-        port: 3000
-    };
+  const mockConfig = {
+    webhookSecret: "test-secret",
+    forwardUrl: "http://test-forward-url.com",
+    port: 3000,
+  };
 
-    beforeEach(() => {
-        // Clear all mocks before each test
-        jest.clearAllMocks();
+  beforeEach(() => {
+    // Clear all mocks before each test
+    jest.clearAllMocks();
 
-        // Reset fetch mock
-        (global.fetch as jest.Mock).mockReset();
+    // Reset fetch mock
+    (global.fetch as jest.Mock).mockReset();
 
-        // Create new server instance
-        server = new Server(mockConfig);
-        mockExpressApp = (express as unknown as MockExpressFactory)();
+    // Create new server instance
+    server = new Server(mockConfig);
+    mockExpressApp = (express as unknown as MockExpressFactory)();
+  });
+
+  describe("webhook endpoint", () => {
+    it("should process webhook and forward request", async () => {
+      // Get the webhook handler function
+      const webhookHandler = mockExpressApp.post.mock.calls[0][1];
+
+      // Mock request and response objects
+      const mockReq = {
+        body: { data: "test-data" },
+      } as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      // Mock successful fetch response
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+      });
+
+      // Call the webhook handler
+      await webhookHandler(mockReq, mockRes);
+
+      // Verify fetch was called with correct parameters
+      expect(global.fetch).toHaveBeenCalledWith(
+        mockConfig.forwardUrl,
+        expect.objectContaining({
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${mockConfig.webhookSecret}`,
+          },
+          body: expect.stringContaining('"payload":{"data":"test-data"}'),
+        })
+      );
+
+      // Verify response was sent correctly
+      expect(mockRes.status).toHaveBeenCalledWith(201);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: expect.any(String),
+          status: "QUEUED",
+        })
+      );
     });
 
-    describe('webhook endpoint', () => {
-        it('should process webhook and forward request', async () => {
-            // Get the webhook handler function
-            const webhookHandler = mockExpressApp.post.mock.calls[0][1];
+    it("should handle errors and return 500 status", async () => {
+      const webhookHandler = mockExpressApp.post.mock.calls[0][1];
 
-            // Mock request and response objects
-            const mockReq = {
-                body: { data: 'test-data' }
-            } as Request;
+      const mockReq = {
+        body: { data: "test-data" },
+      } as Request;
 
-            const mockRes = {
-                status: jest.fn().mockReturnThis(),
-                json: jest.fn()
-            } as unknown as Response;
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
 
-            // Mock successful fetch response
-            (global.fetch as jest.Mock).mockResolvedValueOnce({
-                ok: true,
-                status: 200
-            });
+      // Mock fetch error
+      (global.fetch as jest.Mock).mockRejectedValueOnce(
+        new Error("Network error")
+      );
 
-            // Call the webhook handler
-            await webhookHandler(mockReq, mockRes);
+      // Call the webhook handler
+      await webhookHandler(mockReq, mockRes);
 
-            // Verify fetch was called with correct parameters
-            expect(global.fetch).toHaveBeenCalledWith(
-                mockConfig.forwardUrl,
-                expect.objectContaining({
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${mockConfig.webhookSecret}`
-                    },
-                    body: expect.stringContaining('"payload":{"data":"test-data"}')
-                })
-            );
-        });
-
-        it('should handle errors and return 500 status', async () => {
-            const webhookHandler = mockExpressApp.post.mock.calls[0][1];
-
-            const mockReq = {
-                body: { data: 'test-data' }
-            } as Request;
-
-            const mockRes = {
-                status: jest.fn().mockReturnThis(),
-                json: jest.fn()
-            } as unknown as Response;
-
-            // Mock fetch error
-            (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
-
-            // Call the webhook handler
-            await webhookHandler(mockReq, mockRes);
-
-            // Verify error handling
-            expect(mockRes.status).toHaveBeenCalledWith(500);
-            expect(mockRes.json).toHaveBeenCalledWith({
-                error: 'Internal server error'
-            });
-        });
+      // Verify error handling
+      expect(mockRes.status).toHaveBeenCalledWith(500);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Internal server error",
+      });
     });
 
-    describe('listen', () => {
-        it('should start server on specified port', () => {
-            const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
-
-            server.listen();
-
-            expect(mockExpressApp.listen).toHaveBeenCalledWith(
-                mockConfig.port,
-                expect.any(Function)
-            );
-
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining(`🚀 Webhook server running on port ${mockConfig.port}`)
-            );
-
-            consoleSpy.mockRestore();
-        });
+    it("should verify webhook endpoint path", () => {
+      expect(mockExpressApp.post).toHaveBeenCalledWith(
+        "/api/jobs/dispatch",
+        expect.any(Function)
+      );
     });
+  });
+
+  describe("job endpoints", () => {
+    it("should get job by id", () => {
+      const jobHandler = mockExpressApp.get.mock.calls[0][1];
+      const mockJob = { id: "123", status: "COMPLETED" };
+
+      const mockReq = {
+        params: { id: "123" },
+      } as unknown as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      server["jobCache"].set("123", mockJob);
+
+      jobHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.json).toHaveBeenCalledWith(mockJob);
+    });
+
+    it("should return 404 for non-existent job", () => {
+      const jobHandler = mockExpressApp.get.mock.calls[0][1];
+
+      const mockReq = {
+        params: { id: "non-existent" },
+      } as unknown as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      jobHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(404);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: "Job not found" });
+    });
+
+    it("should cancel job", () => {
+      const cancelHandler = mockExpressApp.delete.mock.calls[0][1];
+      const mockJob = { id: "456", status: "QUEUED" };
+
+      const mockReq = {
+        params: { id: "456" },
+      } as unknown as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      // Update the job status when cancelling
+      server["jobCache"].set("456", { ...mockJob });
+
+      cancelHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+    });
+  });
+
+  describe("listen", () => {
+    it("should start server on specified port", () => {
+      const consoleSpy = jest.spyOn(console, "log").mockImplementation();
+
+      server.listen();
+
+      expect(mockExpressApp.listen).toHaveBeenCalledWith(
+        mockConfig.port,
+        expect.any(Function)
+      );
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `🚀 Webhook server running on port ${mockConfig.port}`
+        )
+      );
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `📮 Forwarding webhooks to: ${mockConfig.forwardUrl}`
+        )
+      );
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `🔒 Validating webhooks with secret: ${mockConfig.webhookSecret.slice(
+            0,
+            6
+          )}...`
+        )
+      );
+
+      consoleSpy.mockRestore();
+    });
+  });
 });
