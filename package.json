@@ -31,7 +31,7 @@
   "author": "Dispatched <info@dispatched.dev>",
   "license": "MIT",
   "devDependencies": {
-    "@rollup/plugin-typescript": "^8.3.0",
+    "@rollup/plugin-typescript": "^12.1.2",
     "@types/express": "^4.17.21",
     "@types/jest": "^27.4.0",
     "@types/node": "^22.10.5",
