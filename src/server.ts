@@ -41,10 +41,10 @@ export class Server {
 
         const webhookBody = {
           jobId: job.id,
-          attempt: randomId(),
+          attemptId: randomId(),
           attemptNumber: 1,
           status: job.status,
-          payload: req.body,
+          payload: req.body?.payload ?? {},
         };
 
         console.log("Sending webhook to:", this.config.forwardUrl, {
@@ -54,23 +54,31 @@ export class Server {
         });
 
         try {
-          const webhookResponse = await fetch(this.config.forwardUrl, {
+          fetch(this.config.forwardUrl, {
             method: "POST",
             headers: webhookHeaders,
             body: JSON.stringify(webhookBody),
-          });
-
-          this.jobCache.set(job.id, {
-            ...job,
-            status: "COMPLETED",
-          });
-          console.log("Webhook Response:", webhookResponse);
+          })
+            .then((res) => {
+              this.jobCache.set(job.id, {
+                ...job,
+                status: "COMPLETED",
+              });
+              console.log("Webhook Response:", res);
+              return res.text();
+            })
+            .then((res) => {
+              console.log("Webhook Response Text:", res);
+            })
+            .catch((err) => {
+              this.jobCache.set(job.id, {
+                ...job,
+                status: "FAILED",
+              });
+              console.log("Webhook Error:", err);
+            });
         } catch (error) {
-          this.jobCache.set(job.id, {
-            ...job,
-            status: "FAILED",
-          });
-          console.log("Webhook Error:", error);
+          console.log("Dispatch Error:", error);
           return res.status(500).json({ error: "Internal server error" });
         }
 
