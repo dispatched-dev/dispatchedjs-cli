@@ -55,12 +55,14 @@ describe("Server", () => {
 
   describe("webhook endpoint", () => {
     it("should process webhook and forward request", async () => {
-      // Get the webhook handler function
       const webhookHandler = mockExpressApp.post.mock.calls[0][1];
 
-      // Mock request and response objects
       const mockReq = {
-        body: { data: "test-data" },
+        body: {
+          payload: {
+            data: "test-data",
+          },
+        },
       } as Request;
 
       const mockRes = {
@@ -72,12 +74,11 @@ describe("Server", () => {
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         status: 200,
+        text: () => Promise.resolve("success"),
       });
 
-      // Call the webhook handler
       await webhookHandler(mockReq, mockRes);
 
-      // Verify fetch was called with correct parameters
       expect(global.fetch).toHaveBeenCalledWith(
         mockConfig.forwardUrl,
         expect.objectContaining({
@@ -90,7 +91,6 @@ describe("Server", () => {
         })
       );
 
-      // Verify response was sent correctly
       expect(mockRes.status).toHaveBeenCalledWith(201);
       expect(mockRes.json).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -104,7 +104,11 @@ describe("Server", () => {
       const webhookHandler = mockExpressApp.post.mock.calls[0][1];
 
       const mockReq = {
-        body: { data: "test-data" },
+        body: {
+          payload: {
+            data: "test-data",
+          },
+        },
       } as Request;
 
       const mockRes = {
@@ -112,15 +116,13 @@ describe("Server", () => {
         json: jest.fn(),
       } as unknown as Response;
 
-      // Mock fetch error
-      (global.fetch as jest.Mock).mockRejectedValueOnce(
-        new Error("Network error")
-      );
+      // Mock fetch throwing an error
+      (global.fetch as jest.Mock).mockImplementationOnce(() => {
+        throw new Error("Network error");
+      });
 
-      // Call the webhook handler
       await webhookHandler(mockReq, mockRes);
 
-      // Verify error handling
       expect(mockRes.status).toHaveBeenCalledWith(500);
       expect(mockRes.json).toHaveBeenCalledWith({
         error: "Internal server error",
@@ -188,12 +190,39 @@ describe("Server", () => {
         json: jest.fn(),
       } as unknown as Response;
 
-      // Update the job status when cancelling
       server["jobCache"].set("456", { ...mockJob });
 
       cancelHandler(mockReq, mockRes);
 
       expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "456",
+        })
+      );
+    });
+
+    it("should not cancel completed job", () => {
+      const cancelHandler = mockExpressApp.delete.mock.calls[0][1];
+      const mockJob = { id: "456", status: "COMPLETED" };
+
+      const mockReq = {
+        params: { id: "456" },
+      } as unknown as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      server["jobCache"].set("456", { ...mockJob });
+
+      cancelHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Job already completed",
+      });
     });
   });
 
