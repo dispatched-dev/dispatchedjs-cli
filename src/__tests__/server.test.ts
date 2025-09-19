@@ -41,6 +41,7 @@ describe("Server", () => {
     webhookSecret: "test-secret",
     forwardUrl: "http://test-forward-url.com",
     port: 3000,
+    scheduledDelay: 1, // 1 second for tests
   };
 
   beforeEach(() => {
@@ -53,6 +54,13 @@ describe("Server", () => {
     // Create new server instance
     server = new Server(mockConfig);
     mockExpressApp = (express as unknown as MockExpressFactory)();
+  });
+
+  afterEach(() => {
+    // Stop job scheduler to prevent tests from hanging
+    if (server) {
+      server.stop();
+    }
   });
 
   describe("webhook endpoint", () => {
@@ -98,11 +106,14 @@ describe("Server", () => {
         expect.objectContaining({
           id: expect.any(String),
           status: "QUEUED",
+          scheduledFor: expect.any(String),
+          payload: { data: "test-data" },
+          createdAt: expect.any(String),
         })
       );
     });
 
-    it("should handle errors and return 500 status", async () => {
+    it("should handle webhook dispatch errors gracefully", async () => {
       const webhookHandler = mockExpressApp.post.mock.calls[0][1];
 
       const mockReq = {
@@ -125,10 +136,22 @@ describe("Server", () => {
 
       await webhookHandler(mockReq, mockRes);
 
-      expect(mockRes.status).toHaveBeenCalledWith(500);
-      expect(mockRes.json).toHaveBeenCalledWith({
-        error: "Internal server error",
-      });
+      // Job creation should still succeed
+      expect(mockRes.status).toHaveBeenCalledWith(201);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: expect.any(String),
+          status: "QUEUED",
+        })
+      );
+
+      // Wait a bit for async dispatch to complete
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Job should be marked as FAILED due to webhook error
+      const jobs = Array.from(server["jobCache"].values());
+      const failedJob = jobs.find(job => job.status === "FAILED");
+      expect(failedJob).toBeDefined();
     });
 
     it("should verify webhook endpoint path", () => {
@@ -223,7 +246,7 @@ describe("Server", () => {
 
       expect(mockRes.status).toHaveBeenCalledWith(400);
       expect(mockRes.json).toHaveBeenCalledWith({
-        error: "Job already completed",
+        error: "Job can only be cancelled when status is QUEUED",
       });
     });
 
@@ -271,7 +294,11 @@ describe("Server", () => {
       updateHandler(mockReq, mockRes);
 
       expect(mockRes.status).toHaveBeenCalledWith(404);
-      expect(mockRes.json).toHaveBeenCalledWith({ error: "Job not found" });
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Job not found",
+        message: "Job with id 'non-existent' does not exist",
+        code: "JOB_NOT_FOUND"
+      });
     });
 
     it("should not update completed job", () => {
@@ -320,6 +347,124 @@ describe("Server", () => {
       expect(mockRes.json).toHaveBeenCalledWith({
         error: "scheduledFor is required",
       });
+    });
+
+    it("should create QUEUED job for future scheduledFor without immediate dispatch", async () => {
+      const webhookHandler = mockExpressApp.post.mock.calls[0][1];
+      const futureTime = new Date(Date.now() + 60000).toISOString(); // 1 minute in future
+
+      const mockReq = {
+        body: {
+          scheduledFor: futureTime,
+          payload: {
+            data: "future-job",
+          },
+        },
+      } as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      await webhookHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(201);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: expect.any(String),
+          status: "QUEUED",
+          scheduledFor: futureTime,
+          payload: { data: "future-job" },
+        })
+      );
+
+      // Verify fetch was NOT called for future job
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it("should create QUEUED job for immediate scheduledFor", async () => {
+      const webhookHandler = mockExpressApp.post.mock.calls[0][1];
+      const pastTime = new Date(Date.now() - 1000).toISOString(); // 1 second ago
+
+      const mockReq = {
+        body: {
+          scheduledFor: pastTime,
+          payload: {
+            data: "immediate-job",
+          },
+        },
+      } as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      // Mock successful fetch response
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve("success"),
+      });
+
+      await webhookHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(201);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: expect.any(String),
+          status: "QUEUED",
+          scheduledFor: pastTime,
+          payload: { data: "immediate-job" },
+        })
+      );
+
+      // Verify fetch WAS called for immediate job
+      expect(global.fetch).toHaveBeenCalled();
+    });
+
+    it("should update QUEUED job and dispatch immediately when scheduledFor becomes immediate", () => {
+      const updateHandler = mockExpressApp.patch.mock.calls[0][1];
+      const mockJob = {
+        id: "future-job",
+        status: "QUEUED",
+        scheduledFor: "2025-01-01T00:00:00Z",
+        payload: { data: "test" },
+        createdAt: "2024-01-01T00:00:00Z"
+      };
+
+      const immediateTime = new Date(Date.now() - 1000).toISOString(); // 1 second ago
+
+      const mockReq = {
+        params: { id: "future-job" },
+        body: { scheduledFor: immediateTime },
+      } as unknown as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      server["jobCache"].set("future-job", { ...mockJob });
+
+      // Mock successful fetch response
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve("success"),
+      });
+
+      updateHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "future-job",
+          status: "QUEUED",
+          scheduledFor: immediateTime,
+        })
+      );
     });
   });
 

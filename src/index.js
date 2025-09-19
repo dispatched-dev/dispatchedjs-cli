@@ -28,12 +28,18 @@ yargs(hideBin(process.argv))
                 default: 3100,
                 description: "Port to run the server on",
             },
+            scheduledDelay: {
+                type: "number",
+                default: 30,
+                description: "Seconds to add to scheduled job times before dispatch",
+            },
         },
         (argv) => {
             const server = new Server({
                 webhookSecret: argv.secret,
                 forwardUrl: argv.forward,
                 port: argv.port,
+                scheduledDelay: argv.scheduledDelay,
             });
             server.listen();
         }
@@ -83,7 +89,8 @@ yargs(hideBin(process.argv))
 
                 if (!response.ok) {
                     const error = await response.json();
-                    console.error('Error updating job:', error.error || response.statusText);
+                    const errorMessage = error.message || error.error || response.statusText;
+                    console.error('Error updating job:', errorMessage);
                     process.exit(1);
                 }
 
@@ -108,6 +115,10 @@ yargs(hideBin(process.argv))
     .example(
         `${BIN_NAME} listen --secret "abc123" --forward "http://localhost:3000/webhook" --port 3200`,
         "Start on custom port"
+    )
+    .example(
+        `${BIN_NAME} listen --secret "abc123" --forward "http://localhost:3000/webhook" --scheduledDelay 10`,
+        "Add 10 seconds delay to scheduled jobs"
     )
     .example(
         `${BIN_NAME} update job123 --scheduledFor "2024-12-31T23:59:59Z"`,
