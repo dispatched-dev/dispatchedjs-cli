@@ -36,6 +36,7 @@ export class Server {
         const job = {
           id: randomId(),
           status: "QUEUED",
+          scheduledFor: req.body?.scheduledFor ? new Date(req.body.scheduledFor).toISOString() : new Date().toISOString(),
         };
         this.jobCache.set(job.id, job);
 
@@ -100,6 +101,37 @@ export class Server {
       }
 
       res.status(200).json(job);
+    });
+
+    this.app.patch("/api/jobs/:id", (req: Request, res: Response) => {
+      const job = this.jobCache.get(req.params.id);
+
+      if (!job) {
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      if (job.status !== "QUEUED") {
+        return res.status(400).json({ error: "Job can only be updated when status is QUEUED" });
+      }
+
+      const { scheduledFor } = req.body;
+
+      if (!scheduledFor) {
+        return res.status(400).json({ error: "scheduledFor is required" });
+      }
+
+      console.log("Updating job", job.id, "with scheduledFor:", scheduledFor);
+
+      const updatedJob = {
+        ...job,
+        scheduledFor: new Date(scheduledFor).toISOString(),
+      };
+
+      this.jobCache.set(req.params.id, updatedJob);
+
+      console.log("Job updated", updatedJob);
+
+      res.status(200).json(updatedJob);
     });
 
     this.app.delete("/api/jobs/:id", (req: Request, res: Response) => {

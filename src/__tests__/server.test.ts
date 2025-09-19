@@ -6,6 +6,7 @@ type MockExpress = jest.Mocked<Express> & {
   use: jest.Mock;
   post: jest.Mock;
   get: jest.Mock;
+  patch: jest.Mock;
   delete: jest.Mock;
   listen: jest.Mock;
 };
@@ -19,6 +20,7 @@ jest.mock("express", () => {
     use: jest.fn(),
     post: jest.fn(),
     get: jest.fn(),
+    patch: jest.fn(),
     delete: jest.fn(),
     listen: jest.fn((port, callback) => callback()),
   };
@@ -222,6 +224,101 @@ describe("Server", () => {
       expect(mockRes.status).toHaveBeenCalledWith(400);
       expect(mockRes.json).toHaveBeenCalledWith({
         error: "Job already completed",
+      });
+    });
+
+    it("should update job scheduledFor", () => {
+      const updateHandler = mockExpressApp.patch.mock.calls[0][1];
+      const mockJob = { id: "789", status: "QUEUED", scheduledFor: "2024-01-01T00:00:00Z" };
+
+      const mockReq = {
+        params: { id: "789" },
+        body: { scheduledFor: "2024-12-31T23:59:59Z" },
+      } as unknown as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      server["jobCache"].set("789", { ...mockJob });
+
+      updateHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(200);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "789",
+          status: "QUEUED",
+          scheduledFor: "2024-12-31T23:59:59.000Z",
+        })
+      );
+    });
+
+    it("should not update non-existent job", () => {
+      const updateHandler = mockExpressApp.patch.mock.calls[0][1];
+
+      const mockReq = {
+        params: { id: "non-existent" },
+        body: { scheduledFor: "2024-12-31T23:59:59Z" },
+      } as unknown as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      updateHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(404);
+      expect(mockRes.json).toHaveBeenCalledWith({ error: "Job not found" });
+    });
+
+    it("should not update completed job", () => {
+      const updateHandler = mockExpressApp.patch.mock.calls[0][1];
+      const mockJob = { id: "completed", status: "COMPLETED", scheduledFor: "2024-01-01T00:00:00Z" };
+
+      const mockReq = {
+        params: { id: "completed" },
+        body: { scheduledFor: "2024-12-31T23:59:59Z" },
+      } as unknown as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      server["jobCache"].set("completed", { ...mockJob });
+
+      updateHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Job can only be updated when status is QUEUED",
+      });
+    });
+
+    it("should require scheduledFor in update request", () => {
+      const updateHandler = mockExpressApp.patch.mock.calls[0][1];
+      const mockJob = { id: "test", status: "QUEUED", scheduledFor: "2024-01-01T00:00:00Z" };
+
+      const mockReq = {
+        params: { id: "test" },
+        body: {},
+      } as unknown as Request;
+
+      const mockRes = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as unknown as Response;
+
+      server["jobCache"].set("test", { ...mockJob });
+
+      updateHandler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(400);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "scheduledFor is required",
       });
     });
   });
