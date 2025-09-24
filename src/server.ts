@@ -30,9 +30,13 @@ export class Server {
       try {
         console.log("Job Received", req.body);
 
-        const scheduledFor = req.body?.scheduledFor ? new Date(req.body.scheduledFor) : new Date();
+        const scheduledFor = req.body?.scheduledFor
+          ? new Date(req.body.scheduledFor)
+          : new Date();
         const now = new Date();
-        const isImmediate = scheduledFor <= now;
+        // Add 2-second buffer plus configured delay to determine if job should be dispatched immediately
+        const bufferTime = new Date(now.getTime() + 2000);
+        const isImmediate = scheduledFor <= bufferTime;
 
         const job = {
           id: randomId(),
@@ -48,7 +52,9 @@ export class Server {
           // Dispatch immediately
           await this.dispatchJob(job);
         } else {
-          console.log(`Job ${job.id} scheduled for ${job.scheduledFor} (will dispatch when time comes)`);
+          console.log(
+            `Job ${job.id} scheduled for ${job.scheduledFor} (will dispatch when time comes)`
+          );
         }
 
         console.log("Dispatch Response", job);
@@ -78,12 +84,14 @@ export class Server {
         return res.status(404).json({
           error: "Job not found",
           message: `Job with id '${req.params.id}' does not exist`,
-          code: "JOB_NOT_FOUND"
+          code: "JOB_NOT_FOUND",
         });
       }
 
       if (job.status !== "QUEUED") {
-        return res.status(400).json({ error: "Job can only be updated when status is QUEUED" });
+        return res
+          .status(400)
+          .json({ error: "Job can only be updated when status is QUEUED" });
       }
 
       const { scheduledFor } = req.body;
@@ -104,9 +112,10 @@ export class Server {
 
       this.jobCache.set(req.params.id, updatedJob);
 
-      // If updated to immediate time and hasn't been dispatched yet, dispatch now
-      if (newScheduledTime <= now) {
-        this.dispatchJob(updatedJob).catch(err => {
+      // If updated to immediate time (considering 2-second buffer) and hasn't been dispatched yet, dispatch now
+      const bufferTime = new Date(now.getTime() + 2000);
+      if (newScheduledTime <= bufferTime) {
+        this.dispatchJob(updatedJob).catch((err) => {
           console.error("Error dispatching updated job:", err);
         });
       }
@@ -201,7 +210,9 @@ export class Server {
       clearInterval(this.jobScheduler);
     }
 
-    console.log(`⏰ Job scheduler started (checking every 1 second, scheduled delay: ${this.config.scheduledDelay} seconds)`);
+    console.log(
+      `⏰ Job scheduler started (checking every 1 second, buffer: 2 seconds, scheduled delay: ${this.config.scheduledDelay} seconds)`
+    );
 
     this.jobScheduler = setInterval(() => {
       this.processScheduledJobs();

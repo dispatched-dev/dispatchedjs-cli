@@ -25,7 +25,7 @@ Options:
 - `--secret` is the secret you want to use to verify the webhook requests. For security reasons, it is recommended to use a different secret than the one you use in production (you can use something simple like "abc123" for local development).
 - `--forward` is the URL that Dispatched will send the webhook requests to.
 - `--port` is the port you want the server to listen on. It defaults to 3100.
-- `--scheduledDelay` is the number of seconds to add to the current time when a job is created before dispatching it. Defaults to 30 seconds. This means jobs will be dispatched at (current time + delay), which mocks future webhook delivery for development purposes.
+- `--scheduledDelay` is the number of seconds to add to the current time when a **future** job is created before dispatching it. Defaults to 30 seconds. This means jobs will be dispatched at (current time + delay), which mocks future webhook delivery for development purposes. Avoids having to wait long for jobs scheduled far in the future.
 
 NOTE: Scheduled jobs will be processed with the configured delay when using the local server.
 
