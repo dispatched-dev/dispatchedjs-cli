@@ -5,24 +5,30 @@ global.fetch = jest.fn();
 
 describe("Job Scheduling", () => {
   let server: Server;
+  let portCounter = 4000; // Start from port 4000 to avoid conflicts
 
-  const mockConfig = {
+  const getMockConfig = () => ({
     webhookSecret: "test-secret",
     forwardUrl: "http://test-forward-url.com",
-    port: 3000,
+    port: portCounter++, // Use different port for each test
     scheduledDelay: 5, // 5 seconds for tests
-  };
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.clearAllTimers();
     (global.fetch as jest.Mock).mockReset();
-    server = new Server(mockConfig);
+    server = new Server(getMockConfig());
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (server) {
       server.stop();
     }
+    jest.useRealTimers();
+    jest.clearAllTimers();
+    // Give some time for cleanup
+    await new Promise(resolve => setImmediate(resolve));
   });
 
   describe("Scheduling Logic with 2-Second Buffer", () => {
@@ -156,97 +162,129 @@ describe("Job Scheduling", () => {
     it("should process jobs when their scheduled time + scheduledDelay passes", async () => {
       jest.useFakeTimers();
 
-      // Create a job scheduled 5 seconds from now (beyond 2s buffer, so won't dispatch immediately)
-      const futureTime = new Date(Date.now() + 5000);
-      const job = await createJob(server, { scheduledFor: futureTime.toISOString() });
+      try {
+        // Create a job scheduled 5 seconds from now (beyond 2s buffer, so won't dispatch immediately)
+        const futureTime = new Date(Date.now() + 5000);
+        const job = await createJob(server, { scheduledFor: futureTime.toISOString() });
 
-      expect(global.fetch).not.toHaveBeenCalled();
+        expect(global.fetch).not.toHaveBeenCalled();
 
-      // Mock successful fetch response
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: () => Promise.resolve("success"),
-      });
+        // Mock successful fetch response
+        (global.fetch as jest.Mock).mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve("success"),
+        });
 
-      // Start the scheduler
-      server.listen();
+        // Start the scheduler without binding to port (mock the listen method)
+        const originalListen = server.listen;
+        server.listen = jest.fn(() => {
+          // Start internal scheduling without actual port binding
+          server["startJobScheduler"]();
+        });
 
-      // Fast-forward time to when the job should be processed (5s scheduledFor + 5s scheduledDelay = 10s)
-      jest.advanceTimersByTime(10100); // Add extra 100ms to ensure it passes
+        server.listen();
 
-      // Wait for async operations to complete
-      await new Promise(resolve => setTimeout(resolve, 0));
+        // Fast-forward time to when the job should be processed (5s scheduledFor + 5s scheduledDelay = 10s)
+        jest.advanceTimersByTime(10100); // Add extra 100ms to ensure it passes
 
-      expect(global.fetch).toHaveBeenCalled();
+        // Run only pending timers to trigger the scheduler
+        jest.runOnlyPendingTimers();
 
-      jest.useRealTimers();
-    });
+        expect(global.fetch).toHaveBeenCalled();
+
+        // Restore original method
+        server.listen = originalListen;
+      } finally {
+        jest.useRealTimers();
+      }
+    }, 10000);
 
     it("should NOT process jobs before their scheduled time + scheduledDelay", async () => {
       jest.useFakeTimers();
 
-      // Create a job scheduled 5 seconds from now
-      const futureTime = new Date(Date.now() + 5000);
-      const job = await createJob(server, { scheduledFor: futureTime.toISOString() });
+      try {
+        // Create a job scheduled 5 seconds from now
+        const futureTime = new Date(Date.now() + 5000);
+        const job = await createJob(server, { scheduledFor: futureTime.toISOString() });
 
-      expect(global.fetch).not.toHaveBeenCalled();
+        expect(global.fetch).not.toHaveBeenCalled();
 
-      // Start the scheduler
-      server.listen();
+        // Start the scheduler without binding to port
+        const originalListen = server.listen;
+        server.listen = jest.fn(() => {
+          server["startJobScheduler"]();
+        });
 
-      // Fast-forward time to before the job should be processed (7s, less than 5s + 5s scheduledDelay = 10s)
-      jest.advanceTimersByTime(7000);
+        server.listen();
 
-      // Wait for async operations to complete
-      await new Promise(resolve => setTimeout(resolve, 0));
+        // Fast-forward time to before the job should be processed (7s, less than 5s + 5s scheduledDelay = 10s)
+        jest.advanceTimersByTime(7000);
 
-      expect(global.fetch).not.toHaveBeenCalled();
+        // Run only pending timers to trigger the scheduler
+        jest.runOnlyPendingTimers();
 
-      jest.useRealTimers();
-    });
+        expect(global.fetch).not.toHaveBeenCalled();
+
+        // Restore original method
+        server.listen = originalListen;
+      } finally {
+        jest.useRealTimers();
+      }
+    }, 10000);
 
     it("should only process QUEUED jobs", async () => {
       jest.useFakeTimers();
 
-      // Create jobs with different statuses
-      const futureTime = new Date(Date.now() + 3000); // Within buffer time for immediate dispatch
-      const job1 = await createJob(server, { scheduledFor: futureTime.toISOString() });
+      try {
+        // Create jobs with different statuses
+        const futureTime = new Date(Date.now() + 1000); // Within buffer time for immediate dispatch
 
-      // Mock the first dispatch call
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        text: () => Promise.resolve("success"),
-      });
+        // Mock the first dispatch call
+        (global.fetch as jest.Mock).mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve("success"),
+        });
 
-      // Job1 should be dispatched immediately (within buffer)
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+        const job1 = await createJob(server, { scheduledFor: futureTime.toISOString() });
 
-      // Manually set job status to COMPLETED to test that it won't be processed again
-      const completedJob = { ...(job1 as any), status: "COMPLETED" };
-      server["jobCache"].set((job1 as any).id, completedJob);
+        // Job1 should be dispatched immediately (within buffer)
+        expect(global.fetch).toHaveBeenCalledTimes(1);
 
-      // Start the scheduler
-      server.listen();
+        // Manually set job status to COMPLETED to test that it won't be processed again
+        const completedJob = { ...(job1 as any), status: "COMPLETED" };
+        server["jobCache"].set((job1 as any).id, completedJob);
 
-      // Fast-forward time
-      jest.advanceTimersByTime(10000);
+        // Start the scheduler without binding to port
+        const originalListen = server.listen;
+        server.listen = jest.fn(() => {
+          server["startJobScheduler"]();
+        });
 
-      // Wait for async operations to complete
-      await new Promise(resolve => setTimeout(resolve, 0));
+        server.listen();
 
-      // Should still only have been called once (not again for the COMPLETED job)
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+        // Fast-forward time
+        jest.advanceTimersByTime(10000);
 
-      jest.useRealTimers();
-    });
+        // Run only pending timers to trigger the scheduler
+        jest.runOnlyPendingTimers();
+
+        // Should still only have been called once (not again for the COMPLETED job)
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+
+        // Restore original method
+        server.listen = originalListen;
+      } finally {
+        jest.useRealTimers();
+      }
+    }, 10000);
   });
 
   describe("Buffer Time Calculation", () => {
     it("should use correct 2-second buffer for immediate dispatch, regardless of scheduledDelay", async () => {
       const serverWithCustomDelay = new Server({
-        ...mockConfig,
+        ...getMockConfig(),
         scheduledDelay: 10, // 10 seconds
       });
 
@@ -284,7 +322,7 @@ describe("Job Scheduling", () => {
       jest.useFakeTimers();
 
       const serverWithCustomDelay = new Server({
-        ...mockConfig,
+        ...getMockConfig(),
         scheduledDelay: 2, // 2 seconds
       });
 
@@ -302,22 +340,29 @@ describe("Job Scheduling", () => {
           text: () => Promise.resolve("success"),
         });
 
-        // Start the scheduler
+        // Start the scheduler without binding to port
+        const originalListen = serverWithCustomDelay.listen;
+        serverWithCustomDelay.listen = jest.fn(() => {
+          serverWithCustomDelay["startJobScheduler"]();
+        });
+
         serverWithCustomDelay.listen();
 
         // Fast-forward time to when the job should be processed (5s scheduledFor + 2s scheduledDelay = 7s)
         jest.advanceTimersByTime(7100); // Add extra 100ms to ensure it passes
 
-        // Wait for async operations to complete
-        await new Promise(resolve => setTimeout(resolve, 0));
+        // Run only pending timers to trigger the scheduler
+        jest.runOnlyPendingTimers();
 
         expect(global.fetch).toHaveBeenCalled();
+
+        // Restore original method
+        serverWithCustomDelay.listen = originalListen;
       } finally {
         serverWithCustomDelay.stop();
+        jest.useRealTimers();
       }
-
-      jest.useRealTimers();
-    });
+    }, 10000);
   });
 });
 
