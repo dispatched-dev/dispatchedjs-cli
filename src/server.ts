@@ -49,8 +49,10 @@ export class Server {
         this.jobCache.set(job.id, job);
 
         if (isImmediate) {
-          // Dispatch immediately
-          await this.dispatchJob(job);
+          // Dispatch immediately (non-blocking)
+          this.dispatchJob(job).catch((err) => {
+            console.error(`Error dispatching job ${job.id}:`, err);
+          });
         } else {
           console.log(
             `Job ${job.id} scheduled for ${job.scheduledFor} (will dispatch when time comes)`
